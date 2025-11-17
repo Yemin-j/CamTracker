@@ -1,0 +1,3 @@
+def multi_cam_association(track_embeds, track_meta, dist_thresh=0.5):
+    # return track_meta with global_id field
+    ...
