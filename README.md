@@ -46,6 +46,8 @@ conda activate mtmdc
 pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
 pip install opencv-python tqdm pyyaml matplotlib pandas
 
+---
+
 ##  Results
 
 The framework provides:
@@ -80,6 +82,7 @@ results/<timestamp>/
     ├── single/<iter>/
     ├── mcta/<iter>/
     └── checkpoints/
+---
 
 ## Citation
 @misc{mtmdc2025,
@@ -88,3 +91,4 @@ results/<timestamp>/
   year         = {2025},
   howpublished = {GitHub Repository},
 }
+---
