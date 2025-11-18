@@ -34,9 +34,7 @@ with frame-level person annotations.
   - track IDs  
   - person identities  
 
----
-
-## Merge Split Archives
+### Merge Split Archives
 
 ```bash
 cat MTMDC.zip.part* > MTMDC.zip
