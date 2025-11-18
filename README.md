@@ -44,12 +44,10 @@ unzip MTMDC.zip
 
 ## Installation
 ```
-conda create -n mtmdc python=3.9 -y
-
+conda create -n mtmdc python=3.9 -y  
 conda activate mtmdc
 
-pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
-
+pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118  
 pip install opencv-python tqdm pyyaml matplotlib pandas
 ```
 
@@ -64,11 +62,11 @@ pip install opencv-python tqdm pyyaml matplotlib pandas
 
 ## Citation
 
-@misc{mtmdc2025,
-  title        = {MTMDC Multi-Camera Tracking Framework},
-  author       = {Yemin-J},
-  year         = {2025},
-  howpublished = {GitHub Repository},
+@misc{mtmdc2025,  
+  title        = {MTMDC Multi-Camera Tracking Framework},  
+  author       = {Yemin-J},  
+  year         = {2025},  
+  howpublished = {GitHub Repository},  
 }
 
 ---
