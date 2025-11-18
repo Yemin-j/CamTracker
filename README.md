@@ -39,14 +39,14 @@ unzip MTMDC.zip
 videos/train/s01/camera01.avi
 annotations/train/s01/camera01/*.json
 
-**Installation**
+## Installation
 conda create -n mtmdc python=3.9 -y
 conda activate mtmdc
 
 pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
 pip install opencv-python tqdm pyyaml matplotlib pandas
 
-**Results**
+##  Results
 
 The framework provides:
 
@@ -81,7 +81,7 @@ results/<timestamp>/
     ├── mcta/<iter>/
     └── checkpoints/
 
-**Citation**
+## Citation
 @misc{mtmdc2025,
   title        = {MTMDC Multi-Camera Tracking Framework},
   author       = {Your Name},
