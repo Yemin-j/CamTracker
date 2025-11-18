@@ -65,10 +65,12 @@ pip install opencv-python tqdm pyyaml matplotlib pandas
 ---
 
 ## Citation
+
 @misc{mtmdc2025,
   title        = {MTMDC Multi-Camera Tracking Framework},
   author       = {Yemin-J},
   year         = {2025},
   howpublished = {GitHub Repository},
 }
+
 ---
