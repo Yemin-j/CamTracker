@@ -45,8 +45,8 @@ unzip MTMDC.zip
 ---
 
 ## Installation
-
-```conda create -n mtmdc python=3.9 -y
+```
+conda create -n mtmdc python=3.9 -y
 
 conda activate mtmdc
 
