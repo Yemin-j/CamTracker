@@ -16,14 +16,8 @@ but is **lightweight, fully custom, and highly extensible**.
 -  **Faster R-CNN + FPN** detector  
 -  **ROI-based ReID embedding head (256-dim)**  
 -  **Single-camera ReID-assisted SORT tracking**  
--  **Multi-camera Global Tracking (MCTA)**  
-  - Tracklet building  
-  - Embedding similarity-based global ID association  
--  **AVI Export**: per-camera + merged multi-camera  
--  **CSV / MOT / COCO Tracking results**  
--  23FPS annotation ↔ 30FPS raw video alignment  
+-  **Multi-camera Global Tracking (MCTA)** 
 -  YAML config system + ETA/Loss logging  
--  **Best-model checkpoint** (single / mcta) + iteration checkpoints
 
 ---
 
