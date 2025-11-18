@@ -1,75 +1,90 @@
-# MTMDC-MultiCamera-Tracking
+# MTMDC Multi-Camera Tracking Framework
 
-A unified PyTorch-based pipeline for **Object Detection + Re-Identification +  
-Single-Camera Tracking + Multi-Camera Tracking (MCTA)**  
-designed for the **AIHub MTMDC (Multi-Target Multi-Domain Camera) Dataset**.
-
-This framework is heavily inspired by **MMDetection/MMTracking**  
-while maintaining a **lightweight, fully customized implementation**.
+## Introduction
+This project provides an end-to-end PyTorch framework for **person detection**, **Re-ID embedding extraction**, **single-camera tracking**, and **multi-camera global tracking (MCTA)**.  
+It is built for the **AI-Hub MTMDC (Multi-Target Multi-Domain Camera)** dataset and follows the modular philosophy of MMDetection/MMTracking while keeping the entire pipeline lightweight and fully custom.
 
 ---
 
-## 🚀 Features
-
-- **Faster R-CNN + FPN Detector**
-- **ROI-based ReID Embedding Head**
-- **Single-Camera Tracking (SORT-like + ReID matching)**
-- **Multi-Camera Tracking (Tracklet building + Global ID Association)**
-- **23FPS Annotation ↔ 30FPS Video Alignment 처리**
-- **Iteration-level Validation (Single + Multi MCTA)**
-- **Best-model Checkpointing**
-- **CSV / MOT / COCO / AVI Visualization Export**
-- **YAML-based Config System**
-- **Logger-based Training Status (ETA, Loss, Iter progress)**
+## Major Features
+- **Faster R-CNN + FPN** detector
+- **ROI-based ReID Head** (256-d embedding)
+- **ReID-assisted Single-Camera Tracking** (SORT-style)
+- **Multi-Camera Global Tracking (MCTA)** via tracklet building and embedding association
+- **Annotation-driven frame sampling** (23 FPS annotation → 30 FPS video alignment)
+- **Iteration-based validation** (Single + Multi)
+- **Checkpoint Manager** (iter checkpoints + best single + best MCTA)
+- **Extensive export tools**: CSV, MOT, COCO, per-camera AVI, merged multi-camera AVI
+- **YAML configuration** & structured logging (ETA, iter progress, losses)
 
 ---
 
-## 📂 Project Structure
+## Data (AI-Hub MTMDC)
+The dataset provides synchronized multi-camera surveillance videos with person-level annotations.
 
+**Key characteristics**
+- Raw video: **30 FPS**
+- Annotation: **23 FPS (7362 annotated frames per scenario)**
+- Per-frame JSON labels containing:
+  - Bounding boxes
+  - Tracking IDs
+  - Person-level identities
 
----
-
-## 📦 Installation
-conda create -n mtmdc python=3.9 -y
-conda activate mtmdc
-
-pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
-
-pip install opencv-python tqdm pyyaml matplotlib pandas
-
-
----
-
-## 📘 Dataset (AIHub MTMDC)
-
-### 1. Download 영상 + annotation
-
-AIHub → MTMDC 링크에서 다운로드  
-(데이터가 분할 압축되어 있으므로 아래 명령어로 병합)
-
+**Merge split archives**
 ```bash
 cat MTMDC.zip.part* > MTMDC.zip
 unzip MTMDC.zip
 
-data/
-  ├── videos/
-  │      ├── train/s01/camera01.avi
-  │      ├── train/s01/camera02.avi
-  │      └── ...
-  └── annotations/
-         ├── train/s01/camera01/*.json
-         ├── train/s01/camera02/*.json
-         └── ...
+Directory structure
+videos/train/s01/camera01.avi
+annotations/train/s01/camera01/*.json
 
-python train.py --config configs/mtmdc.yaml
+Installation
+conda create -n mtmdc python=3.9 -y
+conda activate mtmdc
+
+pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
+pip install opencv-python tqdm pyyaml matplotlib pandas
+
+Results
+
+The framework provides:
+
+Single-Camera Tracking
+
+MOTA, IDF1, FP, FN, IDSW
+
+Multi-Camera Global Tracking (MCTA)
+
+Global IDF1
+
+Global MOTA
+
+Global ID consistency across cameras
+
+Output formats
+
+CSV tracking results
+
+MOTChallenge text files
+
+COCO-Tracking JSON
+
+Per-camera AVI tracking
+
+Multi-camera merged AVI
+
+Outputs are stored under:
 
 results/<timestamp>/
-    ├── train.log
-    ├── checkpoints/
-    │       ├── iter_3000.pt
-    │       ├── best_single.pt
-    │       └── best_mcta.pt
-    ├── single/
-    │       ├── 3000/
-    └── mcta/
-            ├── 3000/
+    ├── single/<iter>/
+    ├── mcta/<iter>/
+    └── checkpoints/
+
+Citation
+@misc{mtmdc2025,
+  title        = {MTMDC Multi-Camera Tracking Framework},
+  author       = {Your Name},
+  year         = {2025},
+  howpublished = {GitHub Repository},
+}
