@@ -54,6 +54,7 @@ pip install torch torchvision torchaudio --extra-index-url https://download.pyto
 
 pip install opencv-python tqdm pyyaml matplotlib pandas
 '''
+
 ---
 
 ## Results
