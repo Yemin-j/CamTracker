@@ -10,18 +10,27 @@ def validate_tracking(model, val_loader, tracker_cls, device):
     pred_records = []
     gt_records = []
 
-    for batch in val_loader:
-        frame, boxes_gt, labels_gt, track_ids_gt, pids, meta = batch
+    for frames, boxes_gt, labels_gt, tids_gt, pids, metas in val_loader:
         # batch_size=1 가정
-        frame = frame.to(device)
-        boxes_gt = boxes_gt[0].cpu().numpy()
-        track_ids_gt_ = track_ids_gt[0].cpu().numpy()
-        frame_idx = int(meta["frame_id"][0])
-        cam_id = meta["cam_id"][0]  # 필요하면 cam별로 별도 acc 만들 수도 있음
-        scenario = meta["scenario"][0]
+        frames = frames.to(device)
 
-        # GT 기록 저장
-        for b, tid in zip(boxes_gt, track_ids_gt_):
+        # metas는 list, 그 안에 dict 하나
+        meta = metas[0]
+        cam_id   = meta["cam_id"]
+        scenario = meta["scenario"]
+
+        # frame_id는 이미 int이거나 0-dim tensor일 가능성
+        fid = meta["frame_id"]
+        if hasattr(fid, "item"):   # tensor일 때
+            frame_idx = int(fid.item())
+        else:
+            frame_idx = int(fid)
+
+        # GT 기록 저장 (boxes_gt[0], tids_gt[0] : 해당 프레임의 GT)
+        boxes_np = boxes_gt[0].cpu().numpy()
+        tids_np  = tids_gt[0].cpu().numpy()
+
+        for b, tid in zip(boxes_np, tids_np):
             x1, y1, x2, y2 = b.tolist()
             gt_records.append(dict(
                 frame_id=frame_idx,
@@ -41,7 +50,7 @@ def validate_tracking(model, val_loader, tracker_cls, device):
             )
 
         # 모델 inference
-        outputs = model(frame)
+        outputs = model(frames)
         out = outputs[0]
         det_boxes  = out["boxes"].to(device)
         det_scores = out["scores"].to(device)
@@ -66,6 +75,5 @@ def validate_tracking(model, val_loader, tracker_cls, device):
 
     # 이제 gt_records vs pred_records 로 MOT metrics 계산
     summary = compute_mot_metrics(gt_records, pred_records)
-    print(summary)
     model.train()
     return summary

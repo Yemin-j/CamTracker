@@ -1,25 +1,35 @@
-# main_train.py
 import os
+import yaml
 import torch
+import time
 from torch.utils.data import DataLoader
-import torchvision.transforms as T
 from torch.optim import Adam
+import torchvision.transforms as T
+from tqdm import tqdm
 
-from datasets.mot_dataloader import AIMTMDCVideoDataset
-from datasets.mot_collate_fn import custom_collate_fn
+from datasets.dataloader import data_loader
+from inference.single_inference import SingleCameraInference
+from inference.multi_inference import MultiCameraInference
+from inference.export_utils import save_mot_txt, save_coco_json, save_single_camera_avi, merge_multi_camera_avi
 
+from utils.logger import setup_logger
+from utils.utils_print import print_val_summary, save_tracking_csv
+from utils.checkpoint import CheckpointManager
+
+from models.detector import DetectorWithReID
 from models.res50_backbone import FPNBackbone
 from models.rpn_head import RPNHead
 from models.roi import RoIAlignLayer
 from models.bbox_head import BBoxHead
 from models.reid_head import ReIDHead
-from models.detector import DetectorWithReID
 
-from tracking.single_camera import SingleCameraTracker  # 학습에는 안 써도 됨
-from tracking.multi_camera_pipeline import MultiCameraTrackingPipeline
+from tracking.single_camera import SingleCameraTracker
+from tracking.eval import validate_tracking
+from tracking.validation_multi import validate_multi_camera
 
-from hook.tracking_eval_hook import TrackingEvalHook
-
+# -----------------------------------------------------------
+# Build model
+# -----------------------------------------------------------
 def build_detector_with_reid(device, num_ids):
     backbone = FPNBackbone()
     rpn_head = RPNHead(
@@ -36,78 +46,216 @@ def build_detector_with_reid(device, num_ids):
     bbox_head = BBoxHead(in_channels=256, fc_dim=1024, num_classes=1, score_thresh=0.0)
     reid_head = ReIDHead(in_channels=256, embed_dim=256, num_ids=num_ids)
     model = DetectorWithReID(backbone, rpn_head, roi_align, bbox_head, reid_head)
-    model.to(device)
-    return model
+    return model.to(device)
 
-def main():
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+# -----------------------------------------------------------
+# Train
+# -----------------------------------------------------------
+def train():
+
+    # ---------------------------
+    # Load Config
+    # ---------------------------
+    with open("./pknu_mtmdc.yaml", "r", encoding="utf-8") as f:
+        cfg = yaml.safe_load(f)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
+    # Setup logger
+    timestamp = str(int(time.time() * 1000))
+    save_root = os.path.join(cfg["log"]["save_dir"], timestamp)
+    os.makedirs(save_root, exist_ok=True)
+    log_file = os.path.join(save_root, "train.log")
+    logger = setup_logger(log_file)
+    ckpt_manager = CheckpointManager(save_root, logger)
+
+    logger.info("===== TRAINING START =====")
+
+    # ---------------------------
+    # Transform
+    # ---------------------------
     transform = T.Compose([
+        # T.ToPILImage(),
+        # T.Resize((540, 960)),
         T.ToTensor(),
-        T.Normalize(mean=[0.485,0.456,0.406], std=[0.229,0.224,0.225])
+        T.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225])
     ])
 
-    video_root = r"D:/tar_trac/data/videos/train"
-    ann_root   = r"D:/tar_trac/data/annotations/train"
-
-    train_scenarios = [f"s{i:02d}" for i in range(1, 2)]
-    val_scenarios = [f"s{i:02d}" for i in range(19, 20)]
-
-    train_dataset = AIMTMDCVideoDataset(
-        video_root=video_root,
-        ann_root=ann_root,
-        scenario_ids=train_scenarios,
-        transform=transform,
-        use_ram=False
+    # ---------------------------
+    # Load dataset
+    # ---------------------------
+    train_loader = data_loader(
+        cfg["train"]["video_root"],
+        cfg["train"]["ann_root"],
+        cfg["scenario"]["train_ids"][:],
+        transform,
+        batch_size=cfg["hyperparams"]["batch_size"],
+        frame_stride=cfg["hyperparams"]["frame_stride"]
     )
-    val_dataset = AIMTMDCVideoDataset(
-        video_root=video_root,
-        ann_root=ann_root,
-        scenario_ids=val_scenarios,
-        transform=transform,
-        use_ram=False
+
+    val_loader = data_loader(
+        cfg["val"]["video_root"],
+        cfg["val"]["ann_root"],
+        cfg["scenario"]["val_ids"][:],
+        transform,
+        batch_size=1,
+        frame_stride=1
     )
-    # TODO: pid → 0..num_ids-1 매핑 필요 (여기선 num_ids를 적당히 넣어둔다)
-    train_loader = DataLoader(train_dataset, batch_size=8, shuffle=True,
-                              num_workers=0, collate_fn=custom_collate_fn(),)
-    val_loader = DataLoader(val_dataset, batch_size=1, shuffle=False,
-                            num_workers=0, collate_fn=custom_collate_fn(),)
 
-    num_ids = 200  # TODO: dataset 전체 pid 기준으로 실제 숫자 세팅
-    model = build_detector_with_reid(device, num_ids)
-    optimizer = Adam(model.parameters(), lr=1e-4)
+    # ---------------------------
+    # Model & Optimizer
+    # ---------------------------
+    model = build_detector_with_reid(device, cfg["model"]["num_ids"])
+    optimizer = Adam(model.parameters(), lr=cfg["hyperparams"]["lr"])
 
-    # Hook 등록
-    eval_hook = TrackingEvalHook(val_loader, SingleCameraTracker, device, interval=1)
-    num_epochs = 2
+    epochs = cfg["hyperparams"]["epochs"]
+    VAL_INTERVAL = cfg["hyperparams"]["val_interval"]
+    warmup_epochs = cfg["hyperparams"]["warmup_epochs"]
 
-    model.train()
-    for epoch in range(num_epochs):
-        model.train()
-        for iter_i, batch in enumerate(train_loader):
-            frame, boxes, labels, tids, pids, meta = batch
+    total_iters = len(train_loader) * epochs
 
-            frame = frame.to(device)
+    logger.info(f"Total train samples: {len(train_loader.dataset)}")
+    logger.info(f"Total iters per epoch: {len(train_loader)}")
+    logger.info(f"Total iters: {total_iters}")
 
-            gt_boxes = [b.to(device) for b in boxes]
+    global_step = 0
+
+    # ---------------------------
+    # Training Loop
+    # ---------------------------
+    for epoch in range(epochs):
+        logger.info(f"===== Epoch {epoch+1}/{epochs} =====")
+
+        start_time = time.time()
+        for iter_i, (frames, boxes, labels, tids, pids, metas) in enumerate(train_loader):
+            global_step += 1
+            frames = frames.to(device)
+
+            gt_boxes  = [b.to(device) for b in boxes]
             gt_labels = [l.to(device) for l in labels]
-            gt_ids = [p.to(device) for p in pids]
+            gt_ids    = [p.to(device) for p in pids]
 
             optimizer.zero_grad()
-            losses = model.forward_train(frame, gt_boxes, gt_labels, gt_ids, epoch=epoch, warmup_epochs=3)
-            loss = losses["loss_total"]
-            loss.backward()
+
+            losses = model.forward_train(
+                frames, gt_boxes, gt_labels, gt_ids,
+                epoch=epoch,
+                warmup_epochs=warmup_epochs
+            )
+
+            loss_total = losses["loss_total"]
+            loss_total.backward()
             optimizer.step()
 
-            if iter_i % 10 == 0:
-                print(f"[Train] epoch {epoch + 1}, iter {iter_i}, "
-                      f"total={loss.item():.4f}, "
-                      f"cls={losses['loss_cls'].item():.4f}, "
-                      f"reg={losses['loss_reg'].item():.4f}, "
-                      f"reid={losses['loss_reid'].item():.4f}")
+            # ETA 계산
+            elapsed = time.time() - start_time
+            remain = (total_iters - global_step) * (elapsed / global_step)
 
-        # epoch 끝나면 자동 검증
-        eval_hook.after_epoch(epoch, model)
+            eta_h = int(remain // 3600)
+            eta_m = int((remain % 3600) // 60)
+
+            if global_step == 1 or global_step % 40 == 0:
+                logger.info(
+                    f"[Epoch {epoch + 1}/{epochs}] "
+                    f"[Iter {iter_i + 1}/{len(train_loader)} | Global {global_step}/{total_iters}] "
+                    f"Loss={loss_total.item():.4f} "
+                    f"cls={losses['loss_cls'].item():.4f} "
+                    f"reg={losses['loss_reg'].item():.4f} "
+                    f"reid={losses['loss_reid'].item():.4f} "
+                    f"ETA={eta_h}h{eta_m}m"
+                )
+
+            # Iteration Validation
+            if global_step % VAL_INTERVAL == 0:
+                logger.info(f"[Validation] iter={global_step}")
+                ckpt_manager.save_iter(model, optimizer, global_step, epoch)
+
+                ########################################
+                # 1) SINGLE CAMERA VALIDATION
+                ########################################
+
+                summary_single = validate_tracking(model, val_loader, SingleCameraTracker, device)
+                print_val_summary(summary_single, title=f"SINGLE@Iter {global_step}")
+
+                val_engine_single = SingleCameraInference(model, device)
+                val_single = val_engine_single.run(val_loader)
+
+                # SINGLE 저장 디렉토리
+                single_dir = os.path.join(save_root, "single", str(global_step))
+                os.makedirs(single_dir, exist_ok=True)
+
+                # 저장
+                save_tracking_csv(val_single, os.path.join(single_dir, "tracking.csv"))
+                save_mot_txt(val_single, os.path.join(single_dir, "mot.txt"))
+                save_coco_json(val_single, os.path.join(single_dir, "coco.json"))
+
+                # 단일 카메라 AVI 저장
+                cam_ids = sorted(list(set([r["cam_id"] for r in val_single])))
+
+                for cam in cam_ids:
+                    cam_results = [r for r in val_single if r["cam_id"] == cam]
+                    save_single_camera_avi(
+                        results=cam_results,
+                        video_root=cfg["val"]["video_root"],
+                        save_path=os.path.join(single_dir, f"{cam}.avi")
+                    )
+
+                ########################################
+                # 2) MULTI-CAMERA (MCTA) VALIDATION
+                ########################################
+
+                summary_multi = validate_multi_camera(model, val_loader, device)
+                print_val_summary(summary_multi, title=f"MULTI(MCTA)@Iter {global_step}")
+
+                val_engine_multi = MultiCameraInference(model, device)
+                val_global = val_engine_multi.run(val_loader)
+
+                # MCTA 저장 디렉토리
+                mcta_dir = os.path.join(save_root, "mcta", str(global_step))
+                os.makedirs(mcta_dir, exist_ok=True)
+
+                # 저장
+                save_tracking_csv(val_global, os.path.join(mcta_dir, "tracking.csv"))
+                save_mot_txt(val_global, os.path.join(mcta_dir, "mot.txt"))
+                save_coco_json(val_global, os.path.join(mcta_dir, "coco.json"))
+                merge_multi_camera_avi(
+                    val_global,
+                    cfg["val"]["video_root"],
+                    os.path.join(mcta_dir, "merged.avi")
+                )
+
+                try:
+                    cur_single_idf1 = float(summary_single.loc["acc", "idf1"])
+                except Exception:
+                    cur_single_idf1 = -1.0
+
+                ckpt_manager.save_best_single(
+                    model=model,
+                    optimizer=optimizer,
+                    global_step=global_step,
+                    epoch=epoch,
+                    cur_idf1=cur_single_idf1
+                )
+
+                # MCTA IDF1
+                try:
+                    cur_mcta_idf1 = float(summary_multi.loc["acc", "idf1"])
+                except Exception:
+                    cur_mcta_idf1 = -1.0
+
+                ckpt_manager.save_best_mcta(
+                    model=model,
+                    optimizer=optimizer,
+                    global_step=global_step,
+                    epoch=epoch,
+                    cur_idf1=cur_mcta_idf1
+                )
+
+        logger.info(f"Epoch {epoch+1} finished.")
+
+    logger.info("===== TRAINING COMPLETE =====")
+
 
 if __name__ == "__main__":
-    main()
+    train()

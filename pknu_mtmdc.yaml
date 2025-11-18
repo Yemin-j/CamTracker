@@ -1,0 +1,38 @@
+# ============================================================
+# Training Configuration YAML
+# ============================================================
+
+train:
+  video_root: "D:/tar_trac/data/videos/train"
+  ann_root:   "D:/tar_trac/data/annotations/train"
+
+val:
+  video_root: "D:/tar_trac/data/videos/val"
+  ann_root:   "D:/tar_trac/data/annotations/val"
+
+test:
+  video_root: "D:/tar_trac/data/videos/test"
+  ann_root: "D:/tar_trac/data/annotations/test"
+
+scenario:
+  train_ids: ["s01", 's10', 's11', 's12', 's13', 's14', 's15', 's16']
+  val_ids:   ["s19", 's42', 's43']
+  test_ids:   ["s17", 's18']
+
+hyperparams:
+  epochs: 20
+  batch_size: 4
+  frame_stride: 5
+  lr: 0.0001
+  warmup_epochs: 3
+  val_interval: 3000
+
+model:
+  num_ids: 500
+  multi: 'multi'
+  single: 'single'
+
+log:
+  save_dir: "D:/tar_trac/results/"
+  loss_curve_path: "D:/tar_trac/results/loss_curve.png"
+  log_file: "D:/tar_trac/results/train.log"

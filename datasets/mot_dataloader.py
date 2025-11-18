@@ -49,7 +49,7 @@ class AIMTMDCVideoDataset(Dataset):
     - Frame random access 최적화
     """
     def __init__(self, video_root, ann_root, scenario_ids,
-                 transform=None, return_pid=True, use_ram=False):
+                 transform=None, return_pid=True, use_ram=False, frame_stride=1):
         """
         video_root: D:/tar_trac/data/videos/train/
             └ s01/c01.avi ...
@@ -65,7 +65,7 @@ class AIMTMDCVideoDataset(Dataset):
         self.frame_cache = CachedFramePool(max_frames=7000)
 
         # 인덱스 생성
-        self.index = self._build_index(scenario_ids)
+        self.index = self._build_index(scenario_ids, frame_stride=frame_stride)
 
         # 원하는 경우: 모든 영상을 RAM에 올리기 (가능하면 매우 빠름)
         if self.use_ram:
@@ -74,7 +74,7 @@ class AIMTMDCVideoDataset(Dataset):
     # -------------------------------------------------------
     # Index builder
     # -------------------------------------------------------
-    def _build_index(self, scenario_ids):
+    def _build_index(self, scenario_ids, frame_stride=1):
         index = []
         for s in scenario_ids:
             video_dir = os.path.join(self.video_root, s)
@@ -92,12 +92,37 @@ class AIMTMDCVideoDataset(Dataset):
                 if not os.path.isdir(cam_ann_dir):
                     continue
 
-                json_files = sorted(
-                    [f for f in os.listdir(cam_ann_dir) if f.endswith(".json")]
-                )
+                cap = cv2.VideoCapture(video_path)
+                total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
+                cap.release()
 
+                # ---------- ② list annotation files ----------
+                json_files = sorted([
+                    f for f in os.listdir(cam_ann_dir)
+                    if f.endswith(".json")
+                ])
+
+                # ---------- ③ build safe index ----------
                 for jf in json_files:
-                    frame_id = int(jf.split("_")[-1].replace(".json", ""))
+                    try:
+                        # Extract frame_id from filename
+                        frame_id = int(jf.split("_")[-1].replace(".json", ""))
+                    except:
+                        # annotation 이름 이상하면 skip
+                        continue
+
+                    if frame_id < 0:
+                        continue
+
+                    # skip annotations that exceed actual video length
+                    if frame_id >= total_frames:
+                        # debug 출력(optional)
+                        # print(f"[WARN] Skip annotation (out of range): {s}/{cam_id}/{jf} (frame={frame_id} >= total={total_frames})")
+                        continue
+
+                    if frame_id % frame_stride != 0:
+                        continue
+
                     ann_path = os.path.join(cam_ann_dir, jf)
 
                     index.append({

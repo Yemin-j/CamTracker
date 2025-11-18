@@ -59,7 +59,12 @@ class BBoxHead(nn.Module):
         # ----- 2. score threshold -----
         keep = scores > self.score_thresh
         if keep.sum() == 0:
-            return torch.empty((0,4)), torch.empty((0,)), torch.empty((0,), dtype=torch.long)
+            device = proposals.device
+            empty_boxes = torch.empty((0, 4), device=device)
+            empty_scores = torch.empty((0,), device=device)
+            empty_labels = torch.empty((0,), dtype=torch.long, device=device)
+            empty_keep = torch.empty((0,), dtype=torch.long, device=device)
+            return empty_boxes, empty_scores, empty_labels, empty_keep
 
         scores = scores[keep]
         proposals = proposals[keep]

@@ -134,6 +134,7 @@ class SingleCameraTracker:
                 results.append(dict(
                     track_id=tid,
                     bbox=st.bbox,
-                    frame_idx=frame_idx
+                    frame_idx=frame_idx,
+                    embed=st.embed
                 ))
         return results
