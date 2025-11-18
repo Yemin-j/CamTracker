@@ -46,6 +46,7 @@ unzip MTMDC.zip
 
 ## Installation
 conda create -n mtmdc python=3.9 -y
+
 conda activate mtmdc
 
 pip install torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu118
