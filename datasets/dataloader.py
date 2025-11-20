@@ -3,7 +3,7 @@ from torch.utils.data import DataLoader
 from .mot_dataloader import AIMTMDCVideoDataset
 from .mot_collate_fn import custom_collate_fn
 
-def data_loader(video_root, ann_root, scenario, transform, batch_size, frame_stride=1):
+def data_loader(video_root, ann_root, scenario, transform, batch_size, frame_stride=1, ):
     dataset = AIMTMDCVideoDataset(
         video_root=video_root,
         ann_root=ann_root,

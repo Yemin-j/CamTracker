@@ -188,8 +188,8 @@ class RPNHead(nn.Module):
             feats,
             img_size,
             gt_boxes,
-            pos_iou_thr: float = 0.7,
-            neg_iou_thr: float = 0.3,
+            pos_iou_thr: float = 0.5,
+            neg_iou_thr: float = 0.5,
             batch_size_per_img: int = 256,
             positive_fraction: float = 0.5,
     ):

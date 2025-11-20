@@ -1,10 +1,10 @@
 import os
 import json
+from json.decoder import JSONDecodeError
 import cv2
 import torch
 from torch.utils.data import Dataset
-from collections import defaultdict
-import numpy as np
+from collections import defaultdict, OrderedDict
 
 class VideoReaderPool:
     """하나의 비디오 파일당 VideoCapture 객체를 미리 열어서 계속 재사용"""
@@ -24,23 +24,24 @@ class VideoReaderPool:
             cap.release()
         self.pool.clear()
 
-class CachedFramePool:
-    """메모리 기반 프레임 캐시 (LRU도 가능하지만 simple dict로 충분)"""
-    def __init__(self, max_frames=5000):
-        self.cache = {}
-        self.limit = max_frames
+class LRUFrameCache:
+    def __init__(self, max_size=1000):   # 1000 프레임 = 약 6GB, 원하는 용량으로 조정
+        self.cache = OrderedDict()
+        self.max_size = max_size
 
     def get(self, key):
-        return self.cache.get(key, None)
+        if key not in self.cache:
+            return None
+        # 최근 사용된 항목으로 이동
+        self.cache.move_to_end(key)
+        return self.cache[key]
 
-    def put(self, key, frame):
-        if len(self.cache) >= self.limit:
-            # 너무 크면 절반 제거해서 메모리 회수
-            keys = list(self.cache.keys())[: self.limit // 2]
-            for k in keys:
-                self.cache.pop(k, None)
-        self.cache[key] = frame
-
+    def put(self, key, value):
+        self.cache[key] = value
+        self.cache.move_to_end(key)
+        if len(self.cache) > self.max_size:
+            # 가장 오래된 프레임 삭제
+            self.cache.popitem(last=False)
 
 class AIMTMDCVideoDataset(Dataset):
     """
@@ -62,7 +63,7 @@ class AIMTMDCVideoDataset(Dataset):
         self.use_ram = use_ram
 
         self.video_pool = VideoReaderPool()
-        self.frame_cache = CachedFramePool(max_frames=7000)
+        self.frame_cache = LRUFrameCache(max_size=1500)
 
         # 인덱스 생성
         self.index = self._build_index(scenario_ids, frame_stride=frame_stride)
@@ -191,6 +192,8 @@ class AIMTMDCVideoDataset(Dataset):
             raise RuntimeError(f"frame load failed: {video_path}, {frame_id}")
 
         frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+        frame = cv2.resize(frame, (960, 540))
+        frame = torch.from_numpy(frame).permute(2, 0, 1).float() / 255.0
         self.frame_cache.put(key, frame)
         return frame
 
@@ -198,8 +201,18 @@ class AIMTMDCVideoDataset(Dataset):
     # Annotation loader
     # -------------------------------------------------------
     def _load_ann(self, ann_path):
-        with open(ann_path, "r") as f:
-            ann = json.load(f)
+        try:
+            with open(ann_path, "r", encoding="utf-8") as f:
+                ann = json.load(f)
+        except (JSONDecodeError, UnicodeDecodeError) as e:
+            # 깨진 json이면 "사람 없는 프레임"으로 처리하고 넘어감
+            print(f"[WARN] Failed to parse JSON: {ann_path} ({e})")
+            return (
+                torch.zeros((0, 4), dtype=torch.float32),
+                torch.zeros((0,), dtype=torch.long),
+                torch.zeros((0,), dtype=torch.long),
+                torch.zeros((0,), dtype=torch.long),
+            )
 
         boxes, labels, tids, pids = [], [], [], []
         for obj in ann.get("objects", []):

@@ -1,6 +1,12 @@
 import torch
 import torch.nn as nn
 
+from models.res50_backbone import FPNBackbone
+from models.rpn_head import RPNHead
+from models.roi import RoIAlignLayer
+from models.bbox_head import BBoxHead
+from models.reid_head import ReIDHead
+
 class DetectorWithReID(nn.Module):
     """
     전체 Detector + ReID 파이프라인을 하나로 묶는 래퍼
@@ -15,6 +21,59 @@ class DetectorWithReID(nn.Module):
         self.bbox_head = bbox_head
         self.reid_head = reid_head
 
+    @staticmethod
+    def build_default(
+            num_ids=500,
+            in_channels=256,
+            fc_dim=1024,
+            num_classes=1,
+            score_thresh=0.0,
+            embed_dim=256,
+            rpn_pre_nms=1000,
+            rpn_post_nms=200,
+            rpn_nms_thresh=0.7,
+            strides=[8, 16, 32, 64],
+            scales=[4, 8, 16],
+            ratios=[0.5, 1.0, 2.0],
+            device="cuda"
+    ):
+        """
+        Build a default DetectorWithReID model instance.
+
+        Only num_ids or key hyperparameters need to be modified when needed.
+        """
+
+        backbone = FPNBackbone()
+
+        rpn_head = RPNHead(
+            in_channels=in_channels,
+            num_anchors=9,
+            strides=strides,
+            scales=scales,
+            ratios=ratios,
+            pre_nms_topk=rpn_pre_nms,
+            post_nms_topk=rpn_post_nms,
+            nms_thresh=rpn_nms_thresh,
+        )
+
+        roi_align = RoIAlignLayer(output_size=7)
+
+        bbox_head = BBoxHead(
+            in_channels=in_channels,
+            fc_dim=fc_dim,
+            num_classes=num_classes,
+            score_thresh=score_thresh,
+        )
+
+        reid_head = ReIDHead(
+            in_channels=in_channels,
+            embed_dim=embed_dim,
+            num_ids=num_ids,
+        )
+
+        model = DetectorWithReID(backbone, rpn_head, roi_align, bbox_head, reid_head)
+        return model.to(device)
+
     @torch.no_grad()
     def forward(self, images):
         """
@@ -28,20 +87,27 @@ class DetectorWithReID(nn.Module):
             }
         ]
         """
+        self.eval()
         B, _, H, W = images.shape
-        feats = self.backbone(images)  # [P2,P3,P4,P5]
-        proposals_per_img = self.rpn_head(feats, img_size=(H, W))
 
-        # 1) backbone feature maps
-        feats = self.backbone(images)
+        # 1) backbone → FPN
+        feats = self.backbone(images)  # [P2, P3, P4, P5]
 
         # 2) RPN proposals
-        H, W = images.shape[-2:]
-        proposals = self.rpn_head(feats, img_size=(H, W))
+        proposals_per_img = self.rpn_head(feats, img_size=(H, W))
 
         outputs = []
-        for b in range(len(proposals)):
+        for b in range(B):
             proposals = proposals_per_img[b]  # proposals for image b: (N,4)
+
+            if proposals.numel() == 0:
+                outputs.append(dict(
+                    boxes=torch.empty((0, 4), device=images.device),
+                    scores=torch.empty((0,), device=images.device),
+                    labels=torch.empty((0,), dtype=torch.long, device=images.device),
+                    embeds=torch.empty((0, self.reid_head.embed_dim), device=images.device),
+                ))
+                continue
 
             # 3) RoIAlign to get fixed-size (N, C, 7, 7)
             roi_feats = self.roi_align(feats, proposals)
@@ -70,12 +136,12 @@ class DetectorWithReID(nn.Module):
             self,
             images,
             gt_boxes,
-            gt_labels,
             gt_ids,
             epoch: int = 0,
-            warmup_epochs: int = 3,
+            global_step=None,
+            warmup_iters=300,
             pos_iou_thr: float = 0.5,
-            neg_iou_thr: float = 0.4,
+            neg_iou_thr: float = 0.5,
             max_samples: int = 128
     ):
         """
@@ -97,22 +163,22 @@ class DetectorWithReID(nn.Module):
         total_loss_cls = 0.0
         total_loss_reg = 0.0
         total_loss_reid = 0.0
-        total_rpn_loss = 0.0  # rpn_head가 loss를 지원하면 쓸 수 있음
         num_imgs_used = 0
 
         # 2) RPN으로부터 proposals 얻기 (joint 단계에서 사용)
-        #    rpn_head가 단순히 proposals만 리턴한다고 가정
-        proposals_per_img = self.rpn_head(feats, img_size=(H, W))
+        #  rpn_head가 단순히 proposals만 리턴한다고 가정
+        # proposals_per_img = self.rpn_head(feats, img_size=(H, W))
 
-        # --- (선택) rpn_head가 loss도 지원한다면 이런 형태로 쓸 수 있음 ---
-        # proposals_per_img, rpn_losses = self.rpn_head.forward_train(
-        #     feats, img_size=(H, W), gt_boxes=gt_boxes
-        # )
-        # total_rpn_loss = rpn_losses["loss_rpn_cls"] + rpn_losses["loss_rpn_reg"]
+        #  rpn_head가 loss도 지원한다면 이런 형태로 쓸 수 있음
+        proposals_per_img, rpn_losses = self.rpn_head.forward_train(
+            feats,
+            img_size=(H, W),
+            gt_boxes=gt_boxes,
+        )
+        total_rpn_loss = rpn_losses["loss_rpn_cls"] + rpn_losses["loss_rpn_reg"]
 
         for b in range(B):
             boxes_gt = gt_boxes[b].to(device)
-            labels_gt = gt_labels[b].to(device)
             ids_gt = gt_ids[b].to(device)
 
             if boxes_gt.numel() == 0:
@@ -121,7 +187,12 @@ class DetectorWithReID(nn.Module):
             # -------------------------------
             # 3) RoI 선택: warm-up vs joint
             # -------------------------------
-            if epoch < warmup_epochs:
+            if global_step is None:
+                use_gt_roi = True  # global_step 안 넘겨주면 항상 GT warmup
+            else:
+                use_gt_roi = (global_step < warmup_iters)
+
+            if use_gt_roi:
                 # warm-up: GT box를 그대로 RoI로 사용
                 rois = boxes_gt
                 gt_cls_targets = torch.ones(
@@ -196,7 +267,8 @@ class DetectorWithReID(nn.Module):
 
             # ReIDHead (positive RoI만 사용)
             embeds = self.reid_head(roi_feats)  # (N, D)
-            if epoch < warmup_epochs:
+
+            if use_gt_roi:
                 # warm-up때는 모든 RoI가 GT라서 모두 positive
                 embeds_pos = embeds
                 ids_pos = reid_ids
@@ -206,9 +278,7 @@ class DetectorWithReID(nn.Module):
                     embeds_pos = embeds[:num_pos]
                     ids_pos = reid_ids
                 else:
-                    # safety
-                    embeds_pos = embeds
-                    ids_pos = reid_ids
+                    continue
 
             loss_reid_dict = self.reid_head.loss(embeds_pos, ids_pos)
             loss_reid = loss_reid_dict["loss_reid"]
@@ -233,7 +303,7 @@ class DetectorWithReID(nn.Module):
         loss_reg_mean = total_loss_reg / num_imgs_used
         loss_reid_mean = total_loss_reid / num_imgs_used
 
-        # (선택) RPN loss를 쓴다면 여기에 포함
+        # RPN loss를 쓴다면 여기에 포함
         loss_rpn_mean = total_rpn_loss / max(num_imgs_used, 1) if total_rpn_loss != 0 else 0.0
 
         # 최종 loss 조합 (가중치는 취향껏 조정)

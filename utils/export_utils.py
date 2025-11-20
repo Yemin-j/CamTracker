@@ -84,7 +84,7 @@ def save_coco_json(results, save_path):
 
     print(f"[EXPORT] COCO JSON saved to {save_path}")
 
-def save_single_camera_avi(results, video_root, save_path, fps=30):
+def save_single_camera_avi(results, video_root, save_path, fps=23):
     """
     results: tracking 결과 (단일 카메라 전용)
     video_root: 원본 비디오 위치 (like "data/videos/test/s01/c01.avi")
@@ -141,7 +141,7 @@ def save_single_camera_avi(results, video_root, save_path, fps=30):
 
     print(f"[EXPORT] AVI saved to {save_path}")
 
-def merge_multi_camera_avi(results, video_root, save_path, fps=30, grid=(2,2)):
+def merge_multi_camera_avi(results, video_root, save_path, fps=23, grid=(2,2)):
     """
     results: 전체 cameras global_tracks
     grid: (rows, cols)

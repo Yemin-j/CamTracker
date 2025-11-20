@@ -1,7 +1,7 @@
 from torch.utils.data import DataLoader
 
-from ..datasets.mot_dataloader import AIMTMDCVideoDataset
-from ..datasets.mot_collate_fn import custom_collate_fn
+from datasets.mot_dataloader import AIMTMDCVideoDataset
+from datasets.mot_collate_fn import custom_collate_fn
 
 def test_data_loader(video_root, ann_root, scenarios, transform, batch_size=1, frame_stride=1):
     dataset = AIMTMDCVideoDataset(

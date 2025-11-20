@@ -8,10 +8,11 @@ import torchvision.transforms as T
 from tqdm import tqdm
 
 from datasets.dataloader import data_loader
-from inference.single_inference import SingleCameraInference
-from inference.multi_inference import MultiCameraInference
-from inference.export_utils import save_mot_txt, save_coco_json, save_single_camera_avi, merge_multi_camera_avi
+from inference.dataloader_builder import test_data_loader
+# from inference.single_inference import SingleCameraInference
+# from inference.multi_inference import MultiCameraInference
 
+from utils.export_utils import save_mot_txt, save_coco_json, save_single_camera_avi, merge_multi_camera_avi
 from utils.logger import setup_logger
 from utils.utils_print import print_val_summary, save_tracking_csv
 from utils.checkpoint import CheckpointManager
@@ -23,8 +24,8 @@ from models.roi import RoIAlignLayer
 from models.bbox_head import BBoxHead
 from models.reid_head import ReIDHead
 
-from tracking.single_camera import SingleCameraTracker
-from tracking.eval import validate_tracking
+# from tracking.single_camera import SingleCameraTracker
+# from tracking.eval import validate_tracking
 from tracking.validation_multi import validate_multi_camera
 
 # -----------------------------------------------------------
@@ -53,7 +54,6 @@ def build_detector_with_reid(device, num_ids):
 # Train
 # -----------------------------------------------------------
 def train():
-
     # ---------------------------
     # Load Config
     # ---------------------------
@@ -64,22 +64,20 @@ def train():
 
     # Setup logger
     timestamp = str(int(time.time() * 1000))
+    timestamp = 'train_' + timestamp
     save_root = os.path.join(cfg["log"]["save_dir"], timestamp)
     os.makedirs(save_root, exist_ok=True)
     log_file = os.path.join(save_root, "train.log")
     logger = setup_logger(log_file)
     ckpt_manager = CheckpointManager(save_root, logger)
 
-    logger.info("===== TRAINING START =====")
-
     # ---------------------------
     # Transform
     # ---------------------------
     transform = T.Compose([
-        # T.ToPILImage(),
-        # T.Resize((540, 960)),
+        T.Resize((540, 960)),
         T.ToTensor(),
-        T.Normalize([0.485, 0.456, 0.406],[0.229, 0.224, 0.225])
+        # T.Normalize([103.530, 116.280, 123.675],[1.0, 1.0, 1.0])
     ])
 
     # ---------------------------
@@ -89,16 +87,16 @@ def train():
         cfg["train"]["video_root"],
         cfg["train"]["ann_root"],
         cfg["scenario"]["train_ids"][:],
-        transform,
+        transform=None,
         batch_size=cfg["hyperparams"]["batch_size"],
         frame_stride=cfg["hyperparams"]["frame_stride"]
     )
 
-    val_loader = data_loader(
+    val_loader = test_data_loader(
         cfg["val"]["video_root"],
         cfg["val"]["ann_root"],
         cfg["scenario"]["val_ids"][:],
-        transform,
+        transform=None,
         batch_size=1,
         frame_stride=1
     )
@@ -110,8 +108,8 @@ def train():
     optimizer = Adam(model.parameters(), lr=cfg["hyperparams"]["lr"])
 
     epochs = cfg["hyperparams"]["epochs"]
-    VAL_INTERVAL = cfg["hyperparams"]["val_interval"]
-    warmup_epochs = cfg["hyperparams"]["warmup_epochs"]
+    val_interval = cfg["hyperparams"]["val_interval"]
+    warmup_iter = cfg["hyperparams"]["warmup_iters"]
 
     total_iters = len(train_loader) * epochs
 
@@ -120,6 +118,8 @@ def train():
     logger.info(f"Total iters: {total_iters}")
 
     global_step = 0
+
+    logger.info("===== TRAINING START =====")
 
     # ---------------------------
     # Training Loop
@@ -133,15 +133,15 @@ def train():
             frames = frames.to(device)
 
             gt_boxes  = [b.to(device) for b in boxes]
-            gt_labels = [l.to(device) for l in labels]
             gt_ids    = [p.to(device) for p in pids]
 
             optimizer.zero_grad()
 
             losses = model.forward_train(
-                frames, gt_boxes, gt_labels, gt_ids,
+                frames, gt_boxes, gt_ids,
                 epoch=epoch,
-                warmup_epochs=warmup_epochs
+                global_step=global_step,
+                warmup_iters=warmup_iter
             )
 
             loss_total = losses["loss_total"]
@@ -157,8 +157,8 @@ def train():
 
             if global_step == 1 or global_step % 40 == 0:
                 logger.info(
-                    f"[Epoch {epoch + 1}/{epochs}] "
                     f"[Iter {iter_i + 1}/{len(train_loader)} | Global {global_step}/{total_iters}] "
+                    f"[Epoch {epoch + 1}/{epochs}] "
                     f"Loss={loss_total.item():.4f} "
                     f"cls={losses['loss_cls'].item():.4f} "
                     f"reg={losses['loss_reg'].item():.4f} "
@@ -167,89 +167,76 @@ def train():
                 )
 
             # Iteration Validation
-            if global_step % VAL_INTERVAL == 0:
+            if global_step % val_interval == 0:
                 logger.info(f"[Validation] iter={global_step}")
                 ckpt_manager.save_iter(model, optimizer, global_step, epoch)
 
                 ########################################
-                # 1) SINGLE CAMERA VALIDATION
+                # VALIDATION (Single + MCTA, 1-pass)
+                ########################################
+                summary_single, summary_mcta, single_results, global_results = \
+                    validate_multi_camera(model, val_loader, device, logger=logger,
+                                          export_per_cam=True, video_root=cfg["val"]["video_root"]) # export_per_cam은 주로 False
+
+                # 콘솔 출력
+                print_val_summary(summary_single, title=f"SINGLE@Iter {global_step}")
+                print_val_summary(summary_mcta, title=f"MCTA@Iter {global_step}")
+
+                ########################################
+                # 결과 저장
                 ########################################
 
-                summary_single = validate_tracking(model, val_loader, SingleCameraTracker, device)
-                print_val_summary(summary_single, title=f"SINGLE@Iter {global_step}")
-
-                val_engine_single = SingleCameraInference(model, device)
-                val_single = val_engine_single.run(val_loader)
-
-                # SINGLE 저장 디렉토리
+                # SINGLE export
                 single_dir = os.path.join(save_root, "single", str(global_step))
                 os.makedirs(single_dir, exist_ok=True)
 
-                # 저장
-                save_tracking_csv(val_single, os.path.join(single_dir, "tracking.csv"))
-                save_mot_txt(val_single, os.path.join(single_dir, "mot.txt"))
-                save_coco_json(val_single, os.path.join(single_dir, "coco.json"))
+                save_tracking_csv(single_results, os.path.join(single_dir, "tracking.csv"))
+                save_mot_txt(single_results, os.path.join(single_dir, "mot.txt"))
+                save_coco_json(single_results, os.path.join(single_dir, "coco.json"))
 
-                # 단일 카메라 AVI 저장
-                cam_ids = sorted(list(set([r["cam_id"] for r in val_single])))
-
+                cam_ids = sorted(list(set(r["cam_id"] for r in single_results)))
                 for cam in cam_ids:
-                    cam_results = [r for r in val_single if r["cam_id"] == cam]
+                    cam_res = [r for r in single_results if r["cam_id"] == cam]
                     save_single_camera_avi(
-                        results=cam_results,
+                        results=cam_res,
                         video_root=cfg["val"]["video_root"],
                         save_path=os.path.join(single_dir, f"{cam}.avi")
                     )
 
-                ########################################
-                # 2) MULTI-CAMERA (MCTA) VALIDATION
-                ########################################
-
-                summary_multi = validate_multi_camera(model, val_loader, device)
-                print_val_summary(summary_multi, title=f"MULTI(MCTA)@Iter {global_step}")
-
-                val_engine_multi = MultiCameraInference(model, device)
-                val_global = val_engine_multi.run(val_loader)
-
-                # MCTA 저장 디렉토리
+                # MCTA export
                 mcta_dir = os.path.join(save_root, "mcta", str(global_step))
                 os.makedirs(mcta_dir, exist_ok=True)
 
-                # 저장
-                save_tracking_csv(val_global, os.path.join(mcta_dir, "tracking.csv"))
-                save_mot_txt(val_global, os.path.join(mcta_dir, "mot.txt"))
-                save_coco_json(val_global, os.path.join(mcta_dir, "coco.json"))
+                save_tracking_csv(global_results, os.path.join(mcta_dir, "tracking.csv"))
+                save_mot_txt(global_results, os.path.join(mcta_dir, "mot.txt"))
+                save_coco_json(global_results, os.path.join(mcta_dir, "coco.json"))
                 merge_multi_camera_avi(
-                    val_global,
+                    global_results,
                     cfg["val"]["video_root"],
                     os.path.join(mcta_dir, "merged.avi")
                 )
 
+                ########################################
+                # BEST checkpoint (single + mcta 평균)
+                ########################################
                 try:
-                    cur_single_idf1 = float(summary_single.loc["acc", "idf1"])
+                    idf1_single = float(summary_single.loc['acc', 'idf1'])
                 except Exception:
-                    cur_single_idf1 = -1.0
+                    idf1_single = 0.0
 
-                ckpt_manager.save_best_single(
+                try:
+                    idf1_mcta = float(summary_mcta.loc['acc', 'idf1'])
+                except Exception:
+                    idf1_mcta = 0.0
+
+                combined_score = (idf1_single + idf1_mcta) / 2.0
+
+                ckpt_manager.save_best(
                     model=model,
                     optimizer=optimizer,
                     global_step=global_step,
                     epoch=epoch,
-                    cur_idf1=cur_single_idf1
-                )
-
-                # MCTA IDF1
-                try:
-                    cur_mcta_idf1 = float(summary_multi.loc["acc", "idf1"])
-                except Exception:
-                    cur_mcta_idf1 = -1.0
-
-                ckpt_manager.save_best_mcta(
-                    model=model,
-                    optimizer=optimizer,
-                    global_step=global_step,
-                    epoch=epoch,
-                    cur_idf1=cur_mcta_idf1
+                    combined_score=combined_score
                 )
 
         logger.info(f"Epoch {epoch+1} finished.")

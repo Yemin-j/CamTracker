@@ -13,26 +13,32 @@ val:
 test:
   video_root: "D:/tar_trac/data/videos/test"
   ann_root: "D:/tar_trac/data/annotations/test"
+  ckpt_exp: "1763465214845"
+  checkpoints: 'checkpoints/iter_3000.pt'
 
 scenario:
-  train_ids: ["s01", 's10', 's11', 's12', 's13', 's14', 's15', 's16']
-  val_ids:   ["s19", 's42', 's43']
-  test_ids:   ["s17", 's18']
+  train_ids: ["s01", 's10', ] # 's11', 's12', 's13', 's14', 's15', 's16'
+  val_ids:   ["s19", ] # 's42', 's43'
+  test_ids:   ["s17"] # , 's18'
 
 hyperparams:
   epochs: 20
   batch_size: 4
-  frame_stride: 5
+  frame_stride: 8
   lr: 0.0001
-  warmup_epochs: 3
-  val_interval: 3000
+  warmup_iters: 2000
+  val_interval: 2000
 
 model:
   num_ids: 500
-  multi: 'multi'
-  single: 'single'
 
 log:
   save_dir: "D:/tar_trac/results/"
   loss_curve_path: "D:/tar_trac/results/loss_curve.png"
   log_file: "D:/tar_trac/results/train.log"
+
+data:
+  img_h: 540
+  img_w: 960
+  norm_mean: [103.530, 116.280, 123.675]
+  norm_std:  [1.0, 1.0, 1.0]

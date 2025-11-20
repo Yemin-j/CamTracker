@@ -3,7 +3,6 @@ import torch.nn.functional as F
 import math
 
 class MultiCameraAssociator:
-
     def __init__(self, mode="greedy", weights=None, thresh=0.5):
         self.mode = mode
         self.weights = weights
