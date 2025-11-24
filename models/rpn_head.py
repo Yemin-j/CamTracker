@@ -8,12 +8,12 @@ from .anchor import AnchorGenerator
 class RPNHead(nn.Module):
     def __init__(self,
                  in_channels=256,
-                 num_anchors=3,
+                 num_anchors=9,
                  strides=[8, 16, 32, 64],
                  scales=[4, 8, 16],      # stride와 곱해져서 실제 anchor 크기 결정
                  ratios=[0.5, 1.0, 2.0],
                  pre_nms_topk=1000,
-                 post_nms_topk=300,
+                 post_nms_topk=200,
                  nms_thresh=0.7,
                  min_box_size=5.0,
                  score_thresh=0.0):
@@ -188,8 +188,8 @@ class RPNHead(nn.Module):
             feats,
             img_size,
             gt_boxes,
-            pos_iou_thr: float = 0.5,
-            neg_iou_thr: float = 0.5,
+            pos_iou_thr: float = 0.7,
+            neg_iou_thr: float = 0.3,
             batch_size_per_img: int = 256,
             positive_fraction: float = 0.5,
     ):
@@ -240,10 +240,10 @@ class RPNHead(nn.Module):
                 _, A, Hf, Wf = cls_b.shape
                 cls_b = cls_b.permute(0, 2, 3, 1).reshape(-1)  # (Hf*Wf*A,)
 
-                # bbox_pred: (B,4A,H,W) → (H*W*A,4)
-                bbox_b = bbox_pred[b:b + 1]  # (1,4A,H,W)
-                bbox_b = bbox_b.view(1, A, 4, Hf, Wf)
-                bbox_b = bbox_b.permute(0, 3, 4, 1, 2).reshape(-1, 4)  # (Hf*Wf*A,4)
+                bbox_b = bbox_pred[b]  # (4A, H, W)
+                bbox_b = bbox_b.view(A, 4, Hf, Wf)  # (A,4,H,W)
+                bbox_b = bbox_b.permute(2, 3, 0, 1)  # (H,W,A,4)
+                bbox_b = bbox_b.reshape(-1, 4)
 
                 obj_list.append(cls_b)
                 deltas_list.append(bbox_b)
@@ -352,6 +352,49 @@ class RPNHead(nn.Module):
                 anchors, objectness.detach().sigmoid(), pred_deltas.detach(), img_h, img_w
             )
             proposals_per_image.append(proposals)
+
+########################################
+            # if b == 0:  # 배치에서 첫 이미지만 디버깅
+            #     try:
+            #         import cv2
+            #         import numpy as np
+            #
+            #         # 1) frames 텐서에서 원본 frame 얻기
+            #         #    (forward_train으로 frames가 전달되는 구조라면 아래처럼)
+            #         #    frames[b]: (3,H,W) tensor, 0~1 값
+            #         frame_tensor = self.debug_frames[b].detach().cpu()  # ← self.debug_frames는 아래에서 설명
+            #         frame_np = (frame_tensor.permute(1, 2, 0).numpy() * 255).astype(np.uint8)
+            #
+            #         # 2) proposals & GT numpy 변환
+            #         props = proposals.detach().cpu().numpy()  # (N,4)
+            #         gt_np = gt.detach().cpu().numpy()  # (M,4)
+            #
+            #         # proposal 너무 많으면 50개만
+            #         if len(props) > 50:
+            #             idx = np.random.choice(len(props), 50, replace=False)
+            #             props = props[idx]
+            #
+            #         vis = frame_np.copy()
+            #
+            #         # 3) proposal 박스 (파란색)
+            #         for (x1, y1, x2, y2) in props:
+            #             x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+            #             cv2.rectangle(vis, (x1, y1), (y2, y2), (255, 0, 0), 1)
+            #
+            #         # 4) GT 박스 (초록색)
+            #         for (x1, y1, x2, y2) in gt_np:
+            #             x1, y1, x2, y2 = map(int, [x1, y1, x2, y2])
+            #             cv2.rectangle(vis, (x1, y1), (x2, y2), (0, 255, 0), 2)
+            #
+            #         # 5) 디버깅용: vis 배열은 여기서 브레이크 걸어서 확인 가능
+            #         self.debug_last_vis = vis  # ← 디버깅시 확인할 수 있도록 클래스 멤버로 저장
+            #         print("[DEBUG] RPN visualization array created.")
+            #         a=1
+            #
+            #
+            #     except Exception as e:
+            #         print("[DEBUG VIS ERROR]", e)
+########################################
 
         if num_images_used == 0:
             zero = torch.tensor(0.0, device=device, requires_grad=True)

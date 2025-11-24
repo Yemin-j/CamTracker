@@ -89,7 +89,6 @@ def save_single_camera_avi(results, video_root, save_path, fps=23):
     results: tracking 결과 (단일 카메라 전용)
     video_root: 원본 비디오 위치 (like "data/videos/test/s01/c01.avi")
     """
-
     # cam_id만 추출
     cam_id = results[0]["cam_id"]
 
@@ -229,3 +228,70 @@ def merge_multi_camera_avi(results, video_root, save_path, fps=23, grid=(2,2)):
 
     out.release()
     print(f"[EXPORT] Multi-camera merged AVI saved: {save_path}")
+
+def save_visdrone_video(detection_results, img_root, save_path, fps=23):
+    """
+    VisDrone2019-MOT 이미지 시퀀스를 하나의 AVI로 저장하는 함수.
+    detection_results: validate_qdtrack()에서 생성된 리스트
+        [
+          {
+            "scenario": seq_id,
+            "frame_id": <int>,
+            "pred_boxes": numpy(N,4),
+            "pred_scores": numpy(N),
+            ...
+          }
+        ]
+    img_root: sequences/<seq_id> (예: .../VisDrone2019-MOT-test/sequences/uav0000137_00000_v/)
+    """
+
+    if len(detection_results) == 0:
+        print("[WARN] No detection results to export video.")
+        return
+
+    # 시퀀스 이름 가져오기
+    seq_id = detection_results[0]["scenario"]
+
+    # output dir 생성
+    os.makedirs(os.path.dirname(save_path), exist_ok=True)
+
+    # 이미지 사이즈 얻기
+    first_frame_id = detection_results[0]["frame_id"]
+    first_img_path = os.path.join(img_root, seq_id, f"{first_frame_id:07d}.jpg")
+    img0 = cv2.imread(first_img_path)
+
+    if img0 is None:
+        raise RuntimeError(f"Cannot read image {first_img_path}")
+
+    H, W = img0.shape[:2]
+
+    # AVI writer
+    fourcc = cv2.VideoWriter_fourcc(*"XVID")
+    out = cv2.VideoWriter(save_path, fourcc, fps, (W, H))
+
+    # detection results는 frame_id 순서대로 정렬 필요
+    det_sorted = sorted(detection_results, key=lambda x: (x["scenario"], x["frame_id"]))
+
+    for det in det_sorted:
+        fid = det["frame_id"]
+
+        img_path = os.path.join(img_root, seq_id, f"{fid:07d}.jpg")
+        frame = cv2.imread(img_path)
+        if frame is None:
+            print(f"[WARN] skip frame {img_path}")
+            continue
+
+        # 예측 박스 그리기 (초록)
+        pred_boxes = det["pred_boxes"]
+        pred_scores = det["pred_scores"]
+
+        for box, score in zip(pred_boxes, pred_scores):
+            x1, y1, x2, y2 = map(int, box)
+            cv2.rectangle(frame, (x1, y1), (x2, y2), (0,255,0), 2)
+            cv2.putText(frame, f"{score:.2f}", (x1, y1-5),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0,255,0), 1)
+
+        out.write(frame)
+
+    out.release()
+    print(f"[EXPORT] Saved AVI → {save_path}")

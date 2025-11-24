@@ -1,10 +1,10 @@
 from torch.utils.data import DataLoader
 
-from .mot_dataloader import AIMTMDCVideoDataset
-from .mot_collate_fn import custom_collate_fn
+from .aihub_dataloader import QDTrackVideoDataset
+from .mot_collate_fn import QDTrackCollateFn
 
 def data_loader(video_root, ann_root, scenario, transform, batch_size, frame_stride=1, ):
-    dataset = AIMTMDCVideoDataset(
+    dataset = QDTrackVideoDataset(
         video_root=video_root,
         ann_root=ann_root,
         scenario_ids=scenario,

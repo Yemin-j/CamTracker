@@ -1,44 +1,109 @@
-# ============================================================
-# Training Configuration YAML
-# ============================================================
+# QDTrack Training Configuration
+# ================================
 
+# Dataset paths
 train:
-  video_root: "D:/tar_trac/data/videos/train"
-  ann_root:   "D:/tar_trac/data/annotations/train"
+  video_root: "D:/tar_trac/VisDrone2019-MOT-train/sequences/"
+  ann_root: "D:/tar_trac/VisDrone2019-MOT-train/annotations/"
 
 val:
-  video_root: "D:/tar_trac/data/videos/val"
-  ann_root:   "D:/tar_trac/data/annotations/val"
+  video_root: "D:/tar_trac/VisDrone2019-MOT-val/sequences/"
+  ann_root: "D:/tar_trac/VisDrone2019-MOT-val/annotations/"
 
 test:
-  video_root: "D:/tar_trac/data/videos/test"
-  ann_root: "D:/tar_trac/data/annotations/test"
-  ckpt_exp: "1763465214845"
-  checkpoints: 'checkpoints/iter_3000.pt'
+  ckpt_exp: "D:/tar_trac/result/qdtrack_train_1763962526270/checkpoints/iter_19200.pth"
 
-scenario:
-  train_ids: ["s01", 's10', ] # 's11', 's12', 's13', 's14', 's15', 's16'
-  val_ids:   ["s19", ] # 's42', 's43'
-  test_ids:   ["s17"] # , 's18'
-
-hyperparams:
-  epochs: 20
-  batch_size: 4
-  frame_stride: 8
-  lr: 0.0001
-  warmup_iters: 2000
-  val_interval: 2000
-
+# Model architecture
 model:
-  num_ids: 500
+  # Basic architecture
+  in_channels: 256
+  fc_dim: 1024
+  num_classes: 1  # Person only
+  embed_dim: 256
 
+  # Detection parameters
+  score_thresh: 0.05
+  nms_thresh: 0.5
+  max_dets: 100
+
+  # ReID parameters
+  temperature: 0.07  # Must be > 0
+
+  # RPN parameters
+  rpn_pre_nms: 1000
+  rpn_post_nms: 200
+  rpn_nms_thresh: 0.7
+
+  # Anchor parameters
+  anchor_scales: [4, 8, 16]
+  anchor_ratios: [0.5, 1.0, 2.0]
+
+  # Backbone
+  pretrained: true  # Use ImageNet pretrained ResNet-50
+
+# Training hyperparameters
+hyperparams:
+  # Basic training params
+  epochs: 12
+  batch_size: 4  # Adjust based on GPU memory (4 for 11GB GPU)
+  lr: 0.0001  # 1e-4, AdamW recommended
+  weight_decay: 0.0001
+
+  # Optimization
+  use_amp: False  # Mixed precision training (highly recommended)
+  use_scheduler: true  # Cosine annealing LR scheduler
+
+  # Data loading
+  num_workers: 2
+  frame_stride: 1  # Sample every N frames
+  cache_size: 200  # Frame cache size (~1.2GB for 200 frames)
+
+  # QDTrack specific
+  temporal_offset_range: 2  # k ∈ [-3, 3]
+  min_track_length: 4  # Minimum frames per track
+
+  # QDTrack training params (from paper)
+  pos_iou_thr: 0.5  # Positive sample threshold
+  neg_iou_thr: 0.3  # Negative sample threshold
+  num_samples_key: 128  # V: samples from key frame
+  num_samples_ref: 256  # K: samples from reference frame
+
+  # Logging & validation
+  log_interval: 40  # Log every N iterations
+  val_interval: 2400  # Validate every N iterations
+  val_batch_size: 1  # Validation batch size
+  val_frame_stride: 1  # Sample every N frames for validation (faster)
+  val_max_batches: null  # Limit validation batches (null = all)
+
+# Logging
 log:
-  save_dir: "D:/tar_trac/results/"
-  loss_curve_path: "D:/tar_trac/results/loss_curve.png"
-  log_file: "D:/tar_trac/results/train.log"
+  save_dir: "D:/tar_trac/result/"
 
-data:
-  img_h: 540
-  img_w: 960
-  norm_mean: [103.530, 116.280, 123.675]
-  norm_std:  [1.0, 1.0, 1.0]
+# GPU & Memory settings
+gpu:
+  device: "cuda"
+  multi_gpu: false  # Set to true for DataParallel/DDP
+
+# ================================
+# Memory Optimization Tips:
+# ================================
+# 1. Reduce batch_size if OOM (4 → 2 → 1)
+# 2. Reduce cache_size if RAM is limited (200 → 100 → 0)
+# 3. Enable use_amp for ~40% memory reduction
+# 4. Set num_workers based on CPU cores (typically 4-8)
+# 5. Don't use use_ram=True unless you have 16+ GB RAM
+#
+# Expected Memory Usage (batch_size=4):
+# - GPU: ~8-10 GB (with AMP)
+# - RAM: ~2-3 GB (with cache_size=200)
+# ================================
+
+# ================================
+# Training Schedule (Paper):
+# ================================
+# - Total: 12 epochs
+# - Learning rate: 0.02 with batch size 16
+# - For smaller batch: scale LR proportionally
+#   (batch_size=4 → lr=0.005)
+# - LR decay at epoch 8 and 11
+# ================================

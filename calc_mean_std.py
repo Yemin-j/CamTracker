@@ -2,7 +2,7 @@ import torch
 from torch.utils.data import DataLoader
 from tqdm import tqdm
 
-from datasets.mot_dataloader import AIMTMDCVideoDataset
+from datasets.aihub_dataloader import AIMTMDCVideoDataset
 from datasets.mot_collate_fn import custom_collate_fn
 import torchvision.transforms as T
 

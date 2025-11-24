@@ -3,7 +3,7 @@ from .rpn_head import RPNHead
 from .roi import RoIAlignLayer
 from .bbox_head import BBoxHead
 from .reid_head import ReIDHead
-from .detector import DetectorWithReID
+from .detector import QDTrackDetector
 
 def build_detector_with_reid():
     backbone = FPNBackbone()
@@ -11,4 +11,4 @@ def build_detector_with_reid():
     roi_align = RoIAlignLayer()
     bbox_head = BBoxHead()
     reid_head = ReIDHead()
-    return DetectorWithReID(backbone, rpn_head, roi_align, bbox_head, reid_head)
+    return QDTrackDetector(backbone, rpn_head, roi_align, bbox_head, reid_head)
