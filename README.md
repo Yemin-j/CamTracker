@@ -56,7 +56,10 @@ pip install opencv-python tqdm pyyaml matplotlib pandas
 ## Results
 - MOTA
 - IDF1
-- The result video will be displayed later
+<video src="https://user-images.githubusercontent.com/xxxxxx/your_video.mp4"
+       controls
+       width="600">
+</video>
 
 ---
 
