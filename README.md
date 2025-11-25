@@ -55,8 +55,9 @@ pip install opencv-python tqdm pyyaml matplotlib pandas
 
 ## Results
 - MOTA
-- IDF1
-- The result video will be displayed later
+- IDF1  
+
+https://github.com/Yemin-j/MultiCamTracker/releases/download/tracking-vis-v1/uav0000086_00000_v_track.mp4
 
 ---
 
