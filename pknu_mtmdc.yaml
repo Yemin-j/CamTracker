@@ -11,7 +11,7 @@ val:
   ann_root: "D:/tar_trac/VisDrone2019-MOT-val/annotations/"
 
 test:
-  ckpt_exp: "D:/tar_trac/result/qdtrack_train_1763962526270/checkpoints/iter_19200.pth"
+  ckpt_exp: "D:/tar_trac/result/qdtrack_train_1763962526270/checkpoints/iter_16800.pth"
 
 # Model architecture
 model:

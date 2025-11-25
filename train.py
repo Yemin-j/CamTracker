@@ -20,7 +20,7 @@ from tracking.validation_multi import validate_multi_camera
 
 # Utils
 from utils.logger import setup_logger
-from utils.export_utils import save_visdrone_video
+from utils.export_utils import save_visdrone_video_resized
 from utils.checkpoint import CheckpointManager
 
 
@@ -375,7 +375,7 @@ def train():
                     seq_results = [r for r in val_metrics["detection_results"] if r["scenario"] == seq_id]
 
                     save_path = os.path.join(save_root, f"val_step{global_step}_{seq_id}.avi")
-                    save_visdrone_video(seq_results, cfg["val"]["video_root"], save_path)
+                    save_visdrone_video_resized(seq_results, cfg["val"]["video_root"], save_path)
                     logger.info(f"[VAL VIDEO SAVED] {save_path}")
 
 

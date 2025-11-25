@@ -49,3 +49,17 @@ class QDTrackCollateFn:
 
         # Keep boxes and IDs as lists (variable length per image)
         return frames_key, frames_ref, boxes_key, boxes_ref, ids_key, ids_ref, metas
+
+    def simple_collate(self, batch):
+        """
+        SingleFrameDataset용 collate:
+        batch: list of (frame, boxes, labels, tids, pids, meta)
+        """
+        import torch
+        frames = torch.stack([b[0] for b in batch], dim=0)
+        boxes = [b[1] for b in batch]
+        labels = [b[2] for b in batch]
+        tids = [b[3] for b in batch]
+        pids = [b[4] for b in batch]
+        metas = [b[5] for b in batch]
+        return frames, boxes, labels, tids, pids, metas

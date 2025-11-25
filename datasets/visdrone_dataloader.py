@@ -205,3 +205,127 @@ class VisDroneQDTrackDataset(Dataset):
         }
 
         return frame_key, frame_ref, boxes_key, boxes_ref, ids_key, ids_ref, meta
+
+class VisDroneSingleFrameDataset(Dataset):
+    """
+    VisDrone 2019-MOT Single Frame dataset.
+    - training이 아닌 validation/test/tracking inference용
+    - temporal pair가 필요 없어서 frame drop 없음 (GT 없는 frame도 허용)
+    - tracking inference(t→t-1)에서도 자연스럽게 사용 가능
+    """
+
+    def __init__(self,
+                 video_root,
+                 ann_root,
+                 scenario_ids,
+                 resize_w=960,
+                 resize_h=540,
+                 frame_stride=1,
+                 transform=None):
+        self.video_root = video_root
+        self.ann_root = ann_root
+        self.scenario_ids = scenario_ids
+        self.resize_w = resize_w
+        self.resize_h = resize_h
+        self.frame_stride = frame_stride
+        self.transform = transform
+
+        self.items = self._build_index()
+
+    def _build_index(self):
+        items = []  # (seq_id, frame_id, img_path, ann_path)
+
+        for seq in self.scenario_ids:
+            img_dir = os.path.join(self.video_root, seq)
+            ann_path = os.path.join(self.ann_root, seq + ".txt")
+
+            if not os.path.isdir(img_dir) or not os.path.exists(ann_path):
+                continue
+
+            # 모든 프레임 로드
+            imgs = sorted([f for f in os.listdir(img_dir) if f.endswith(".jpg")])
+            # imgs = sorted(imgs, key=lambda f: int(f.replace('.jpg','')))
+
+            for f in imgs:
+                frame_id = int(f.replace(".jpg", ""))
+
+                # stride 적용
+                if frame_id % self.frame_stride != 0:
+                    continue
+
+                items.append({
+                    "seq": seq,
+                    "frame_id": frame_id,
+                    "img_path": os.path.join(img_dir, f),
+                    "ann_path": ann_path,
+                })
+
+        return items
+
+    def __len__(self):
+        return len(self.items)
+
+    # frame loader 동일
+    def _load_frame(self, img_path):
+        img = cv2.imread(img_path)
+        if img is None:
+            raise RuntimeError(f"Failed to load image: {img_path}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        orig_h, orig_w = img.shape[:2]
+        img = cv2.resize(img, (self.resize_w, self.resize_h))
+        tensor = torch.from_numpy(img).permute(2,0,1).float()/255.0
+        return tensor, (orig_w, orig_h)
+
+    # GT loader 동일 + person-only filter
+    def _load_ann(self, ann_path, frame_id, orig_w, orig_h):
+        boxes, ids = [], []
+        scale_x = self.resize_w / orig_w
+        scale_y = self.resize_h / orig_h
+
+        with open(ann_path,"r") as f:
+            for line in f:
+                fr, tid, x, y, w, h, score, cat, trunc, occ = map(int, line.split(","))
+                if fr != frame_id:
+                    continue
+                if tid <= 0:
+                    continue
+                if cat not in [1, 2]:   # person only
+                    continue
+
+                x1 = x * scale_x
+                y1 = y * scale_y
+                x2 = (x + w) * scale_x
+                y2 = (y + h) * scale_y
+                boxes.append([x1, y1, x2, y2])
+                ids.append(tid)
+
+        if len(boxes) == 0:
+            return torch.zeros((0,4)), torch.zeros((0,), dtype=torch.long)
+        return torch.tensor(boxes,dtype=torch.float32), torch.tensor(ids,dtype=torch.long)
+
+    def __getitem__(self, idx):
+        item = self.items[idx]
+        seq = item["seq"]
+        frame_id = item["frame_id"]
+        img_path = item["img_path"]
+        ann_path = item["ann_path"]
+
+        frame, (orig_w, orig_h) = self._load_frame(img_path)
+        boxes, ids = self._load_ann(ann_path, frame_id, orig_w, orig_h)
+
+        if self.transform:
+            frame = self.transform(frame)
+
+        meta = {
+            "seq": seq,
+            "frame_id": frame_id,
+            "orig_w": orig_w,
+            "orig_h": orig_h,
+            "resize_w": self.resize_w,
+            "resize_h": self.resize_h
+        }
+
+        # validation_qdtrack 호환 포맷:
+        # (frames, boxes, labels, tids, pids, metas)
+        return frame, boxes, None, ids, None, meta
+

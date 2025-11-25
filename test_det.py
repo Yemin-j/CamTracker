@@ -2,22 +2,26 @@ import os
 import time
 import yaml
 import torch
+from torch.utils.data import DataLoader
 import argparse
 
 from utils.logger import setup_logger
-from inference.validation_qdtrack import (
-    build_validation_dataloader,
-    validate_qdtrack,
-    compute_detection_metrics,
-)
-from utils.export_utils import save_visdrone_video
+from utils.export_utils import save_tracking_avi
+
+from inference.single_inference import SingleCameraInference
+
+from datasets.visdrone_dataloader import VisDroneSingleFrameDataset
+from datasets.mot_collate_fn import QDTrackCollateFn
+from datasets.load_ids import list_visdrone_sequences
+
 from train import build_qdtrack_model  # train.py에 이미 정의되어 있음
+
 
 
 def parse_args():
     p = argparse.ArgumentParser()
     p.add_argument("--config", type=str, default="pknu_mtmdc.yaml")
-    p.add_argument("--ckpt", type=str, default='D:/tar_trac/result/qdtrack_train_1763962526270/checkpoints/iter_19200.pth',
+    p.add_argument("--ckpt", type=str, default='D:/tar_trac/result/qdtrack_train_1763969133470/checkpoints/iter_16800.pth',
                    help="직접 체크포인트 경로 지정 (없으면 best_model.pth 사용)")
     return p.parse_args()
 
@@ -71,41 +75,49 @@ def main():
         model.load_state_dict(state)
     model.to(device)
 
-    # --------------------
-    # 5) validation/test dataloader 생성
-    #    (build_validation_dataloader 는 우리가 재작성한 temporal용 함수)
-    # --------------------
-    val_loader = build_validation_dataloader(cfg, device)  #
-    logger.info(f"[TEST-DET] Validation dataset size: {len(val_loader.dataset)}")
+    # --------------------------
+    # 5)validation/test dataloader 생성
+    # --------------------------
+    test_ids = list_visdrone_sequences(cfg["val"]["video_root"])
+    dataset = VisDroneSingleFrameDataset(
+        video_root=cfg["val"]["video_root"],
+        ann_root=cfg["val"]["ann_root"],
+        scenario_ids=test_ids,
+        frame_stride=1,
+        resize_w=960,
+        resize_h=540,
+        transform=None,
+    )
+
+    test_loader = DataLoader(
+        dataset,
+        batch_size=1,
+        shuffle=False,
+        num_workers=0,
+        collate_fn=QDTrackCollateFn().simple_collate,
+        pin_memory=True
+    )
+    logger.info(f"[TEST-DET] Validation dataset size: {len(test_loader.dataset)}")
 
     # --------------------
     # 6) validate_qdtrack 으로 detection-only 평가
     # --------------------
-    metrics = validate_qdtrack(model, val_loader, device, logger=logger)  #
+    infer = SingleCameraInference(model, device, logger=logger)  # :contentReference[oaicite:4]{index=4}
+    tracking_results = infer.run(test_loader)
 
-    det_metrics = compute_detection_metrics(metrics["detection_results"])
-    logger.info("[TEST-DET] Detection Metrics:")
-    logger.info(f"  Precision: {det_metrics['precision']:.4f}")
-    logger.info(f"  Recall:    {det_metrics['recall']:.4f}")
-    logger.info(f"  F1-score:  {det_metrics['f1']:.4f}")
-    logger.info(f"  TP: {det_metrics['tp']}, FP: {det_metrics['fp']}, FN: {det_metrics['fn']}")
+    # --------------------------
+    # 6) Save AVI (track_id 포함)
+    # --------------------------
+    seq_ids = set([r["scenario"] for r in tracking_results])
+    img_root = cfg["val"]["video_root"]
 
-    print("\n===== TEST DET RESULT =====")
-    print(f"Precision: {det_metrics['precision']:.4f}")
-    print(f"Recall:    {det_metrics['recall']:.4f}")
-    print(f"F1-score:  {det_metrics['f1']:.4f}")
-    print(f"TP: {det_metrics['tp']}, FP: {det_metrics['fp']}, FN: {det_metrics['fn']}")
-    print(f"Log saved to: {log_file}")
-    print("===========================\n")
+    for seq in seq_ids:
+        seq_res = [t for t in tracking_results if t["scenario"] == seq]
+        save_path = os.path.join(save_root, f"{seq}_track.avi")
+        save_tracking_avi(seq_res, img_root, save_path)
 
-    img_root = cfg["val"]["video_root"]  # ex) sequences/
-    for seq_id in set([r["scenario"] for r in metrics["detection_results"]]):
-        seq_results = [r for r in metrics["detection_results"] if r["scenario"] == seq_id]
+    logger.info("TEST tracking completed.")
 
-        save_path = os.path.join(save_root, f"{seq_id}.avi")
-        save_visdrone_video(seq_results, img_root, save_path)
-
-    logger.info("Done test_det.")
 
 if __name__ == "__main__":
     main()
