@@ -55,8 +55,9 @@ pip install opencv-python tqdm pyyaml matplotlib pandas
 
 ## Results
 - MOTA
-- IDF1
-<video src="https://user-images.githubusercontent.com/xxxxxx/your_video.mp4"
+- IDF1  
+  
+<video src="https://github.com/Yemin-j/MultiCamTracker/your_video.mp4"
        controls
        width="600">
 </video>
