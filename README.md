@@ -21,26 +21,31 @@ but is **lightweight, fully custom, and highly extensible**.
 
 ---
 
-## Dataset: AI-Hub MTMDC
+## Dataset: VisDrone-MOT2019
 
-The MTMDC dataset contains synchronized multi-camera surveillance videos  
-with frame-level person annotations.
+The VisDrone-MOT2019 dataset is a large-scale aerial multi-object tracking benchmark captured by UAVs (drones).
+It contains diverse urban scenarios with varying altitudes, lighting conditions, object densities, and camera motions.
 
 ### Characteristics
-- Raw video: **30 FPS**
-- Annotation frame_id: **23 FPS × 320 sec = 7362 frames**
-- Per-frame `.json` with:
-  - bounding boxes  
-  - track IDs  
-  - person identities  
 
-### Merge Split Archives
+Raw video FPS: 25–30 FPS
 
-```bash
-cat MTMDC.zip.part* > MTMDC.zip
-unzip MTMDC.zip 
-```
----
+Resolution: 1920×1080 or 2688×1520 (depending on the sequence)
+
+Scenes: Crowded urban streets, intersections, highways, residential zones
+
+Annotations:
+
+- Per-frame bounding boxes (x, y, w, h)
+- Track IDs (consistent identity across frames)
+- Occlusion ratios
+- Visibility information
+- Object categories (pedestrians, vehicles, bicycles, tricycles, etc.)
+
+Sequence Split:
+- Train: 40 sequences
+- Validation: 16 sequences
+- Test: 40 sequences (labels with held)
 
 ## Installation
 ```
@@ -54,8 +59,9 @@ pip install opencv-python tqdm pyyaml matplotlib pandas
 ---
 
 ## Results
-- MOTA
-- IDF1  
+1 Epoch
+- MOTA : 18.5
+- IDF1 : 30.5
 
 https://github.com/Yemin-j/MultiCamTracker/releases/download/tracking-vis-v1/uav0000086_00000_v_track.mp4
 
