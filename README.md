@@ -1,6 +1,6 @@
 ---
 
-# MTMDC Multi-Camera Tracking Framework
+# SCMT(Single-Camera Multi-Tracking) Framework
 
 An end-to-end PyTorch framework for  
 **Person Detection → ReID Feature Extraction → Single-Camera Tracking → Multi-Camera Global Tracking (MCTA)**  
