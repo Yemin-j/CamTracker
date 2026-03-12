@@ -3,7 +3,7 @@
 # SCMT(Single-Camera Multi-Tracking) Framework
 
 An end-to-end PyTorch framework for  
-**Person Detection → ReID Feature Extraction → Single-Camera Tracking → Multi-Camera Global Tracking (MCTA)**  
+**Person Detection → ReID Feature Extraction → Single-Camera Tracking**  
 designed specifically for the **AI-Hub MTMDC Dataset**.
 
 The project follows MMDetection/MMTracking’s modular philosophy  
